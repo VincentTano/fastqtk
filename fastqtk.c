@@ -156,7 +156,7 @@ int main(int argc, char * argv[])
 
     size_t  bytes_read,bytes_read1,bytes_read2,x;
     size_t  i,j,k,b1i,b2i,l;
-    size_t j1,j2,k1,k2,k1old,k2old;
+    size_t j1,j2,k1,k2,k1old,k2old,j3,j4,k3,k4;
     long int threshold,trim,retain;
 
     FILE *fip, *fr1, *fr2;
@@ -402,6 +402,17 @@ int main(int argc, char * argv[])
                 return 1;
             } else {
                 usage = 23;
+            }
+        } else if (strcmp(argv[1],"fq8-4") == 0) {
+            if (argc != 4) {
+                fprintf(stderr, "\n");
+                fprintf(stderr, "Usage:   fastqtk  fq8-4  <in.fq>  <out.fq>\n\n");
+
+                fprintf(stderr, "It combines an interleaved FASTQ file to a concatenated FASTQ file.\n");
+                fprintf(stderr, "For redirecting to STDOUT/STDIN use - instead of file name.\n\n");
+                return 1;
+            } else {
+                usage = 24;
             }
         }
     }
@@ -3552,7 +3563,176 @@ int main(int argc, char * argv[])
         return 0;
     } // end REVCOM
 
-   
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+    /*
+    FQ8-4
+    */
+    if (usage == 24) {
+        is_stdin = 0;
+        if (strcmp(argv[2],"-")==0) {
+            fip = stdin;
+            is_stdin = 1;
+        } else {
+            fip = myfopen(argv[2],"r");
+        }
+        is_stdout = 0;
+        if (strcmp(argv[3],"-")==0) {
+            fop = stdout;
+            is_stdout = 1;
+        } else {
+            fop = myfopen(argv[3],"w");
+
+        }
+        
+
+        buffer = mymalloc(BUFFER_SIZE * SIZE_OF_CHAR + 1);
+        b1 = mymalloc(BUFFER_SIZE * SIZE_OF_CHAR + 1);
+
+        i = 0;
+        j = 0;
+        k = 0;
+
+        j1 = 0;
+        j2 = 0;
+        k1 = 0;
+        k2 = 0;
+        
+        b1i = 0;
+
+        j3 = 0;
+        j4 = 0;
+        k3 = 0;
+        k4 = 0;
+
+        while(1) {
+            bytes_read = fread(buffer + k, SIZE_OF_CHAR, BUFFER_SIZE - k, fip);
+            bytes_read = k + bytes_read;
+            k = 0;
+            j2 = 0;
+
+            if (ferror(fip)) {
+                    fprintf(stderr, "ERROR: Failed reading the input file.\n");
+                    return 2;
+            }
+            if (bytes_read == 0 && feof(fip)) {
+                    break;
+            }
+            if (feof(fip)) {
+                if(buffer[bytes_read-1] != '\n') {
+                    bytes_read = bytes_read + 1;
+                    buffer[bytes_read-1] = '\n';
+                } else if (bytes_read > 1 && buffer[bytes_read-2] == '\n' && buffer[bytes_read-1] == '\n') {
+                    bytes_read = bytes_read - 1;
+                }
+            }
+
+            flag = 0;
+            for (i=0;i<bytes_read;i++) {
+                flag = 0;
+                if (buffer[i] == '\n') {
+                    j = j + 1;
+                    if (j==1) {
+                        k1 = i + 1;
+                    } else if (j==2) {
+                        k2 = i + 1;
+                    } else if (j==3) {
+                        j1 = i + 1;
+                    } else if (j==4) {
+                        // j4 = id2 start
+                        j4 = i + 1;
+                    } else if (j==5) {
+                        // k3 = seq2 start
+                        k3 = i + 1;
+                    } else if (j==6) {
+                        // k4 = plus2 start
+                        k4 = i + 1;
+                    } else if (j==7) {
+                        // j3 = qual2 start
+                        j3 = i + 1;
+                    } else if (j==8) {
+                        // j2 = id start
+                        // k1 = seq start
+                        // k2 = plus start
+                        // j1 = qual start
+                        // i = end of qual
+                        // (j2,i) = entire read - id, seq, +, qual
+
+                        l = i - j2 + 1;
+                        if (b1i + l > BUFFER_SIZE - 10) {
+                            fwrite(b1, SIZE_OF_CHAR, b1i, fop);
+                            b1i = 0;
+                        }
+                        
+                        //copy id
+                        l = k1 - j2;
+                        r1 = 0;
+                        for(x=j2+1;x<k1-1;x++) {
+                            if(buffer[x]==' ' && r1>0) {
+                                r1++;
+                                buffer[x] = '\n';
+                                l = x + 1 - j2;
+                                break;
+                            }
+                        }
+                        memcpy(b1+b1i,buffer+j2,l);
+                        //b1[b1i] = '>';
+                        b1i = b1i + l;
+                        //copy seq
+                        l = k2 - k1 - 1;
+                        memcpy(b1+b1i,buffer+k1,l);
+                        b1i = b1i + l;
+
+                        l = k4 - k3;
+                        memcpy(b1+b1i,buffer+k3,l);
+                        b1i = b1i + l;
+                        //copy plus
+                        l = j1 - k2;
+                        memcpy(b1+b1i,buffer+k2,l);
+                        b1i = b1i + l;
+                        //copy qual
+                        l = j4 - j1 - 1;
+                        memcpy(b1+b1i,buffer+j1,l);
+                        b1i = b1i + l;
+
+                        l = i + 1 - j3;
+                        memcpy(b1+b1i,buffer+j3,l);
+                        b1i = b1i + l;
+
+                        flag = 1;
+                        j = 0;
+                        j2 = i + 1;
+                    }
+                }
+            }
+            
+            if (flag == 0) {
+                k = bytes_read - j2;
+                memcpy(buffer,buffer+j2,k);
+                j = 0;
+                j2 = 0;
+                j1 = 0;
+                k1 = 0;
+                k2 = 0;
+            }
+
+            //fwrite(buffer, SIZE_OF_CHAR, bytes_read, fop);
+        }
+        
+        if (b1i != 0) {
+            fwrite(b1, SIZE_OF_CHAR, b1i, fop);
+        }
+        if (is_stdin == 0) {
+            fclose(fip);
+        }
+        if (is_stdout == 0) {
+            fclose(fop);
+        }
+
+        free(buffer);
+        return 0;
+    } // end FQ8-4
 }
 
 
